@@ -1,0 +1,6 @@
+{
+  "name": "SplitStudio - Video Splitting Platform",
+  "description": "Modern online video splitting SaaS with frame-accurate cutting, interactive timeline, multiple markers, and native FFmpeg background processing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
