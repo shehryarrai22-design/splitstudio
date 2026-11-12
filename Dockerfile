@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install dependencies needed to compile the frontend and run the TypeScript server.
 COPY package.json ./
-RUN npm install
+RUN npm install --verbose
 COPY . .
 RUN npm run build
 
