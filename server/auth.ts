@@ -13,7 +13,7 @@ interface Session {
   expiresAt: number;
 }
 
-const SESSIONS_FILE = path.resolve(process.cwd(), 'data', 'sessions.json');
+const SESSIONS_FILE = path.resolve(process.env.DATA_DIR || path.resolve(process.cwd(), 'data'), 'sessions.json');
 
 function loadSessions(): Map<string, Session> {
   const map = new Map<string, Session>();

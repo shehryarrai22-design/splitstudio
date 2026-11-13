@@ -55,16 +55,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Auth
-  sendRegistrationOtp: (name: string, email: string, password: string) =>
-    request<{ message: string }>('/api/auth/send-otp', {
+  completeRegistration: (name: string, password: string, idToken: string) =>
+    request<{ user: User; token: string }>('/api/auth/complete-registration', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
-    }),
-
-  verifyRegistrationOtp: (email: string, otp: string) =>
-    request<{ user: User; token: string }>('/api/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email, otp }),
+      body: JSON.stringify({ name, password, idToken }),
     }),
 
   login: (email: string, password: string) =>

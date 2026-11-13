@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
 import { SplitStudio } from './components/SplitStudio';
@@ -14,6 +14,24 @@ function AppContent() {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<'studio' | 'library' | 'jobs' | 'storage' | 'admin'>('studio');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [emailVerificationReturn, setEmailVerificationReturn] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get('emailVerified') === '1') {
+      setEmailVerificationReturn(true);
+      setIsAuthModalOpen(true);
+
+      params.delete('emailVerified');
+      const query = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+      );
+    }
+  }, []);
   const [selectedStudioVideo, setSelectedStudioVideo] = useState<VideoItem | null>(null);
 
   const handleSelectVideoForStudio = (video: VideoItem) => {
@@ -117,7 +135,7 @@ function AppContent() {
       </footer>
 
       {/* Authentication Modal */}
-      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} emailVerificationReturn={emailVerificationReturn} />
     </div>
   );
 }

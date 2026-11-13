@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { createRequire } from 'module';
@@ -124,159 +123,101 @@ function streamVideoFile(req: Request, res: Response, filePath: string, mimeType
 // ----------------------------------------------------
 
 
-// Temporary registration records. OTPs expire after 10 minutes.
-const pendingRegistrations = new Map<string, {
-  name: string;
-  email: string;
-  passwordHash: string;
-  otpHash: string;
-  expiresAt: number;
-  attempts: number;
-  lastSentAt: number;
-}>();
 
-app.post('/api/auth/send-otp', async (req, res) => {
-  const { email, password, name } = req.body;
+app.post('/api/auth/complete-registration', async (req, res) => {
+  const { name, password, idToken } = req.body || {};
 
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Name, email, and password are required' });
-  }
+  const normalizedName = String(name || '').trim();
+  const normalizedPassword = String(password || '');
+  const firebaseIdToken = String(idToken || '');
 
-  const normalizedEmail = String(email).trim().toLowerCase();
-  const normalizedName = String(name).trim();
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-    return res.status(400).json({ error: 'Please enter a valid email address' });
+  if (!normalizedName || !normalizedPassword || !firebaseIdToken) {
+    return res.status(400).json({
+      error: 'Name, password, and verified email are required',
+    });
   }
 
   if (normalizedName.length < 2) {
     return res.status(400).json({ error: 'Please enter your full name' });
   }
 
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+  if (normalizedPassword.length < 6) {
+    return res.status(400).json({
+      error: 'Password must be at least 6 characters long',
+    });
   }
 
-  if (db.getUserByEmail(normalizedEmail)) {
-    return res.status(409).json({ error: 'An account with this email already exists' });
-  }
+  const apiKey = process.env.FIREBASE_API_KEY;
 
-  const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'Email service is not configured on the server' });
+    return res.status(500).json({
+      error: 'Firebase authentication is not configured on the server',
+    });
   }
-
-  const previous = pendingRegistrations.get(normalizedEmail);
-  if (previous && Date.now() - previous.lastSentAt < 60_000) {
-    return res.status(429).json({ error: 'Please wait one minute before requesting another code' });
-  }
-
-  const otp = String(randomInt(100000, 1000000));
-  const otpHash = createHash('sha256').update(otp).digest('hex');
 
   try {
-    const emailResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'SplitStudio <onboarding@resend.dev>',
-        to: [normalizedEmail],
-        subject: 'Your SplitStudio verification code',
-        html: `
-          <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#18181b">
-            <h2>Verify your email</h2>
-            <p>Use this code to finish creating your SplitStudio account:</p>
-            <div style="font-size:32px;font-weight:bold;letter-spacing:8px;padding:16px;background:#f4f4f5;border-radius:12px;text-align:center">${otp}</div>
-            <p>This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
-          </div>
-        `,
-      }),
-    });
+    const firebaseResponse = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: firebaseIdToken }),
+      }
+    );
 
-    if (!emailResponse.ok) {
-      const details = await emailResponse.text();
-      console.error('Resend email error:', details);
-      return res.status(502).json({
-        error: 'Could not send the email. Check your Resend testing recipient and API key.',
+    const firebaseData = await firebaseResponse.json() as {
+      users?: Array<{
+        email?: string;
+        emailVerified?: boolean;
+      }>;
+    };
+
+    const firebaseUser = firebaseData.users?.[0];
+
+    if (!firebaseResponse.ok || !firebaseUser?.email) {
+      return res.status(401).json({
+        error: 'Invalid or expired verification session. Please try again.',
       });
     }
 
-    pendingRegistrations.set(normalizedEmail, {
+    if (firebaseUser.emailVerified !== true) {
+      return res.status(403).json({
+        error: 'Please verify your email before creating your account.',
+      });
+    }
+
+    const verifiedEmail = firebaseUser.email.trim().toLowerCase();
+
+    if (db.getUserByEmail(verifiedEmail)) {
+      return res.status(409).json({
+        error: 'An account with this email already exists. Please log in.',
+      });
+    }
+
+    const settings = db.getSettings();
+    const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const newUser = db.createUser({
+      id: userId,
+      email: verifiedEmail,
       name: normalizedName,
-      email: normalizedEmail,
-      passwordHash: hashPassword(String(password)),
-      otpHash,
-      expiresAt: Date.now() + 10 * 60_000,
-      attempts: 0,
-      lastSentAt: Date.now(),
+      passwordHash: hashPassword(normalizedPassword),
+      role: 'user',
+      storageQuotaBytes: settings.defaultQuotaBytes,
+      status: 'active',
+      createdAt: new Date().toISOString(),
     });
 
-    return res.json({ message: 'Verification code sent. Check your email.' });
+    const token = createSession(newUser.id);
+    const { passwordHash: _, ...userSafe } = newUser;
+
+    return res.status(201).json({ user: userSafe, token });
   } catch (error) {
-    console.error('Email sending failed:', error);
-    return res.status(502).json({ error: 'Unable to send verification email right now' });
+    console.error('Firebase registration verification failed:', error);
+    return res.status(502).json({
+      error: 'Unable to verify your email right now. Please try again.',
+    });
   }
-});
-
-app.post('/api/auth/verify-otp', (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase();
-  const otp = String(req.body.otp || '').trim();
-
-  if (!email || !/^\d{6}$/.test(otp)) {
-    return res.status(400).json({ error: 'Enter your email and the 6-digit verification code' });
-  }
-
-  const pending = pendingRegistrations.get(email);
-
-  if (!pending || Date.now() > pending.expiresAt) {
-    pendingRegistrations.delete(email);
-    return res.status(400).json({ error: 'Your code has expired or was not requested. Please sign up again.' });
-  }
-
-  if (pending.attempts >= 5) {
-    pendingRegistrations.delete(email);
-    return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
-  }
-
-  const submittedHash = Buffer.from(createHash('sha256').update(otp).digest('hex'), 'hex');
-  const savedHash = Buffer.from(pending.otpHash, 'hex');
-
-  if (!timingSafeEqual(submittedHash, savedHash)) {
-    pending.attempts += 1;
-    if (pending.attempts >= 5) {
-      pendingRegistrations.delete(email);
-    }
-    return res.status(400).json({ error: 'Incorrect verification code' });
-  }
-
-  if (db.getUserByEmail(email)) {
-    pendingRegistrations.delete(email);
-    return res.status(409).json({ error: 'An account with this email already exists' });
-  }
-
-  const settings = db.getSettings();
-  const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-  const newUser = db.createUser({
-    id: userId,
-    email: pending.email,
-    name: pending.name,
-    passwordHash: pending.passwordHash,
-    role: 'user',
-    storageQuotaBytes: settings.defaultQuotaBytes,
-    status: 'active',
-    createdAt: new Date().toISOString(),
-  });
-
-  pendingRegistrations.delete(email);
-
-  const token = createSession(newUser.id);
-  const { passwordHash: _, ...userSafe } = newUser;
-
-  return res.status(201).json({ user: userSafe, token });
 });
 
 // Block the old unverified registration route.
