@@ -121,6 +121,8 @@ function AppContent() {
             <span className="font-bold text-zinc-300">SplitStudio</span>
             <span className="text-zinc-600">•</span>
             <span>Online Frame-Accurate Video Splitting Platform</span>
+            <span className="text-zinc-600">•</span>
+            <span className="text-zinc-400">Created by Shehryar Rai</span>
           </div>
 
           <div className="flex items-center gap-4 text-[11px] font-mono">
