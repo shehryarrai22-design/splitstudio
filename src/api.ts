@@ -36,16 +36,19 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
   });
 
-  if (!response.ok) {
-    let errorMsg = 'An unexpected error occurred';
-    try {
-      const errData = await response.json();
-      errorMsg = errData.error || errorMsg;
-    } catch {
-      errorMsg = await response.text();
-    }
-    throw new Error(errorMsg);
+ if (!response.ok) {
+  const responseText = await response.text();
+  let errorMsg = responseText || 'An unexpected error occurred';
+
+  try {
+    const errData = JSON.parse(responseText);
+    errorMsg = errData.error || errorMsg;
+  } catch {
+    // Keep the original response text
   }
+
+  throw new Error(errorMsg);
+}
 
   return response.json();
 }
