@@ -7,7 +7,8 @@ interface AuthContextType {
   loading: boolean;
   storageStats: UserStorageStats | null;
   login: (email: string, pass: string) => Promise<void>;
-  register: (name: string, email: string, pass: string) => Promise<void>;
+  sendRegistrationOtp: (name: string, email: string, pass: string) => Promise<void>;
+  verifyRegistrationOtp: (email: string, otp: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   refreshStorage: () => Promise<void>;
@@ -63,8 +64,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await refreshStorage();
   };
 
-  const register = async (name: string, email: string, pass: string) => {
-    const res = await api.register(name, email, pass);
+  const sendRegistrationOtp = async (name: string, email: string, pass: string) => {
+    await api.sendRegistrationOtp(name, email, pass);
+  };
+
+  const verifyRegistrationOtp = async (email: string, otp: string) => {
+    const res = await api.verifyRegistrationOtp(email, otp);
     setStoredToken(res.token);
     setUser(res.user);
     await refreshStorage();
@@ -88,7 +93,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         storageStats,
         login,
-        register,
+        sendRegistrationOtp,
+        verifyRegistrationOtp,
         logout,
         refreshUser,
         refreshStorage,

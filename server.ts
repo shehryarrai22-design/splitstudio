@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { createRequire } from 'module';
@@ -122,44 +123,165 @@ function streamVideoFile(req: Request, res: Response, filePath: string, mimeType
 // AUTHENTICATION ROUTES
 // ----------------------------------------------------
 
-app.post('/api/auth/register', (req, res) => {
+
+// Temporary registration records. OTPs expire after 10 minutes.
+const pendingRegistrations = new Map<string, {
+  name: string;
+  email: string;
+  passwordHash: string;
+  otpHash: string;
+  expiresAt: number;
+  attempts: number;
+  lastSentAt: number;
+}>();
+
+app.post('/api/auth/send-otp', async (req, res) => {
   const { email, password, name } = req.body;
 
   if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Email, password, and name are required' });
+    return res.status(400).json({ error: 'Name, email, and password are required' });
   }
 
-  if (password.length < 6) {
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedName = String(name).trim();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ error: 'Please enter a valid email address' });
+  }
+
+  if (normalizedName.length < 2) {
+    return res.status(400).json({ error: 'Please enter your full name' });
+  }
+
+  if (String(password).length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters long' });
   }
 
-  const existing = db.getUserByEmail(email);
-  if (existing) {
-    return res.status(400).json({ error: 'An account with this email already exists' });
+  if (db.getUserByEmail(normalizedEmail)) {
+    return res.status(409).json({ error: 'An account with this email already exists' });
+  }
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Email service is not configured on the server' });
+  }
+
+  const previous = pendingRegistrations.get(normalizedEmail);
+  if (previous && Date.now() - previous.lastSentAt < 60_000) {
+    return res.status(429).json({ error: 'Please wait one minute before requesting another code' });
+  }
+
+  const otp = String(randomInt(100000, 1000000));
+  const otpHash = createHash('sha256').update(otp).digest('hex');
+
+  try {
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'SplitStudio <onboarding@resend.dev>',
+        to: [normalizedEmail],
+        subject: 'Your SplitStudio verification code',
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#18181b">
+            <h2>Verify your email</h2>
+            <p>Use this code to finish creating your SplitStudio account:</p>
+            <div style="font-size:32px;font-weight:bold;letter-spacing:8px;padding:16px;background:#f4f4f5;border-radius:12px;text-align:center">${otp}</div>
+            <p>This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
+          </div>
+        `,
+      }),
+    });
+
+    if (!emailResponse.ok) {
+      const details = await emailResponse.text();
+      console.error('Resend email error:', details);
+      return res.status(502).json({
+        error: 'Could not send the email. Check your Resend testing recipient and API key.',
+      });
+    }
+
+    pendingRegistrations.set(normalizedEmail, {
+      name: normalizedName,
+      email: normalizedEmail,
+      passwordHash: hashPassword(String(password)),
+      otpHash,
+      expiresAt: Date.now() + 10 * 60_000,
+      attempts: 0,
+      lastSentAt: Date.now(),
+    });
+
+    return res.json({ message: 'Verification code sent. Check your email.' });
+  } catch (error) {
+    console.error('Email sending failed:', error);
+    return res.status(502).json({ error: 'Unable to send verification email right now' });
+  }
+});
+
+app.post('/api/auth/verify-otp', (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const otp = String(req.body.otp || '').trim();
+
+  if (!email || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ error: 'Enter your email and the 6-digit verification code' });
+  }
+
+  const pending = pendingRegistrations.get(email);
+
+  if (!pending || Date.now() > pending.expiresAt) {
+    pendingRegistrations.delete(email);
+    return res.status(400).json({ error: 'Your code has expired or was not requested. Please sign up again.' });
+  }
+
+  if (pending.attempts >= 5) {
+    pendingRegistrations.delete(email);
+    return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
+  }
+
+  const submittedHash = Buffer.from(createHash('sha256').update(otp).digest('hex'), 'hex');
+  const savedHash = Buffer.from(pending.otpHash, 'hex');
+
+  if (!timingSafeEqual(submittedHash, savedHash)) {
+    pending.attempts += 1;
+    if (pending.attempts >= 5) {
+      pendingRegistrations.delete(email);
+    }
+    return res.status(400).json({ error: 'Incorrect verification code' });
+  }
+
+  if (db.getUserByEmail(email)) {
+    pendingRegistrations.delete(email);
+    return res.status(409).json({ error: 'An account with this email already exists' });
   }
 
   const settings = db.getSettings();
   const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  const passwordHash = hashPassword(password);
 
   const newUser = db.createUser({
     id: userId,
-    email: email.trim().toLowerCase(),
-    name: name.trim(),
-    passwordHash,
+    email: pending.email,
+    name: pending.name,
+    passwordHash: pending.passwordHash,
     role: 'user',
     storageQuotaBytes: settings.defaultQuotaBytes,
     status: 'active',
     createdAt: new Date().toISOString(),
   });
 
+  pendingRegistrations.delete(email);
+
   const token = createSession(newUser.id);
   const { passwordHash: _, ...userSafe } = newUser;
 
-  res.status(201).json({
-    user: userSafe,
-    token,
-  });
+  return res.status(201).json({ user: userSafe, token });
+});
+
+// Block the old unverified registration route.
+app.post('/api/auth/register', (_req, res) => {
+  return res.status(410).json({ error: 'Email verification is required. Please use the verification signup flow.' });
 });
 
 app.post('/api/auth/login', (req, res) => {

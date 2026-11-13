@@ -52,10 +52,16 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Auth
-  register: (name: string, email: string, password: string) =>
-    request<{ user: User; token: string }>('/api/auth/register', {
+  sendRegistrationOtp: (name: string, email: string, password: string) =>
+    request<{ message: string }>('/api/auth/send-otp', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
+    }),
+
+  verifyRegistrationOtp: (email: string, otp: string) =>
+    request<{ user: User; token: string }>('/api/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
     }),
 
   login: (email: string, password: string) =>
