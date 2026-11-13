@@ -3,7 +3,29 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import { User, VideoItem, SplitJob, SystemSettings } from './types.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const LEGACY_DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR || LEGACY_DATA_DIR);
+
+// Preserve existing database and files when switching data directories.
+if (DATA_DIR !== LEGACY_DATA_DIR) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  const oldDb = path.join(LEGACY_DATA_DIR, 'db.json');
+  const newDb = path.join(DATA_DIR, 'db.json');
+
+  if (!fs.existsSync(newDb) && fs.existsSync(oldDb)) {
+    fs.copyFileSync(oldDb, newDb);
+    console.log('Migrated existing database to:', DATA_DIR);
+  }
+
+  const oldStorage = path.join(LEGACY_DATA_DIR, 'storage');
+  const newStorage = path.join(DATA_DIR, 'storage');
+
+  if (!fs.existsSync(newStorage) && fs.existsSync(oldStorage)) {
+    fs.cpSync(oldStorage, newStorage, { recursive: true });
+    console.log('Migrated existing storage files to:', DATA_DIR);
+  }
+}
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 export const STORAGE_DIR = path.join(DATA_DIR, 'storage');
 export const UPLOADS_DIR = path.join(STORAGE_DIR, 'uploads');

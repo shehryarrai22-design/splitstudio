@@ -37,18 +37,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleFillDemo = (type: 'admin' | 'user') => {
-    setError(null);
-    if (type === 'admin') {
-      setEmail('shehryarrai22@gmail.com');
-      setPassword('AdminPass123!');
-      setMode('login');
-    } else {
-      setEmail('demo@splitstudio.io');
-      setPassword('DemoPass123!');
-      setMode('login');
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -165,47 +153,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* 1-Click Quick Testing Credentials */}
-        <div className="mt-6 pt-5 border-t border-zinc-800">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              Quick Test Presets
-            </span>
-            <span className="text-[10px] text-violet-400 flex items-center gap-1">
-              <Sparkles className="w-3 h-3" /> 1-Click Fill
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleFillDemo('admin')}
-              className="flex flex-col text-left p-2.5 rounded-xl bg-zinc-950/80 border border-purple-900/40 hover:border-purple-500/60 transition group"
-            >
-              <div className="flex items-center gap-1.5 text-xs font-medium text-purple-300">
-                <Shield className="w-3.5 h-3.5 text-purple-400" />
-                <span>Admin User</span>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
-                shehryarrai22@...
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleFillDemo('user')}
-              className="flex flex-col text-left p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800 hover:border-violet-500/60 transition group"
-            >
-              <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-300">
-                <User className="w-3.5 h-3.5 text-violet-400" />
-                <span>Standard User</span>
-              </div>
-              <span className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">
-                demo@splitstudio.io
-              </span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
